@@ -337,9 +337,6 @@ export default function AdminSessionDetailPage() {
                         {isClientEvent(e.event_type) && e.duration != null && (
                           <div><p className="text-xs font-medium uppercase tracking-wide text-slate-400">Time away</p><p className="mt-0.5 text-slate-700">{e.duration >= 60 ? `${Math.floor(e.duration / 60)}m ` : ""}{(e.duration % 60).toFixed(1)}s</p></div>
                         )}
-                        {!isClientEvent(e.event_type) && e.event_type !== "person_absent" && (
-                          <div><p className="text-xs font-medium uppercase tracking-wide text-slate-400">Confidence</p><p className="mt-0.5 text-slate-700">{(e.confidence * 100).toFixed(0)}%</p></div>
-                        )}
                       </div>
                     </div>
                     {e.snapshot_path ? (

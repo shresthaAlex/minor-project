@@ -289,9 +289,6 @@ function ResultsContent() {
                         {isClientEvent(event.event_type) && event.duration != null && (
                           <div><p className="text-xs font-medium text-muted-foreground">Time away</p><p className="mt-0.5 text-foreground">{event.duration >= 60 ? `${Math.floor(event.duration / 60)}m ` : ""}{(event.duration % 60).toFixed(1)}s</p></div>
                         )}
-                        {!isClientEvent(event.event_type) && event.event_type !== "person_absent" && (
-                          <div><p className="text-xs font-medium text-muted-foreground">Confidence</p><p className="mt-0.5 text-foreground">{(event.confidence * 100).toFixed(0)}%</p></div>
-                        )}
                       </div>
                     </div>
                     {event.snapshot_path && (

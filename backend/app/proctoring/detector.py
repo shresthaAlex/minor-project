@@ -15,6 +15,28 @@ def _find_class_id(names: dict, label: str) -> Optional[int]:
     return None
 
 
+def _iou(a: list[int], b: list[int]) -> float:
+    """Intersection-over-union of two xyxy boxes."""
+    ix1, iy1 = max(a[0], b[0]), max(a[1], b[1])
+    ix2, iy2 = min(a[2], b[2]), min(a[3], b[3])
+    inter = max(0, ix2 - ix1) * max(0, iy2 - iy1)
+    if inter == 0:
+        return 0.0
+    area_a = (a[2] - a[0]) * (a[3] - a[1])
+    area_b = (b[2] - b[0]) * (b[3] - b[1])
+    return inter / float(area_a + area_b - inter)
+
+
+def _dedupe(detections: list[dict], iou_threshold: float) -> list[dict]:
+    """Greedy NMS-style dedup keeping the highest-confidence box per overlap cluster."""
+    ordered = sorted(detections, key=lambda d: d["confidence"], reverse=True)
+    kept = []
+    for det in ordered:
+        if all(_iou(det["bbox"], other["bbox"]) < iou_threshold for other in kept):
+            kept.append(det)
+    return kept
+
+
 @dataclass
 class SessionState:
     """Per-session state for tracking detection continuity."""
@@ -38,9 +60,17 @@ class ProctorDetector:
     class IDs dynamically from the model's own names dictionary.
     """
 
-    def __init__(self, model_path: str = "best.pt", conf_threshold: float = 0.50):
+    def __init__(
+        self,
+        model_path: str = "best.pt",
+        conf_threshold: float = 0.50,
+        person_conf_threshold: float = 0.55,
+        person_dedup_iou: float = 0.50,
+    ):
         self.model = YOLO(model_path)
         self.conf_threshold = conf_threshold
+        self.person_conf_threshold = person_conf_threshold
+        self.person_dedup_iou = person_dedup_iou
         self.sessions: dict[str, SessionState] = {}
 
         # Dynamically resolve class IDs from model labels
@@ -73,8 +103,8 @@ class ProctorDetector:
 
         results = self.model(frame, conf=self.conf_threshold, verbose=False)[0]
 
-        detections = []
-        person_count = 0
+        person_candidates = []
+        other_detections = []
         phone_detected = False
 
         for box in results.boxes:
@@ -83,19 +113,26 @@ class ProctorDetector:
             x1, y1, x2, y2 = map(int, box.xyxy[0])
             name = self.model.names[cls]
 
-            detections.append(
-                {
-                    "class_id": cls,
-                    "label": name,
-                    "confidence": round(conf, 3),
-                    "bbox": [x1, y1, x2, y2],
-                }
-            )
+            detection = {
+                "class_id": cls,
+                "label": name,
+                "confidence": round(conf, 3),
+                "bbox": [x1, y1, x2, y2],
+            }
 
             if cls == self.person_class_id:
-                person_count += 1
-            elif cls == self.phone_class_id:
-                phone_detected = True
+                # Higher floor for persons: reflections/posters land just above
+                # conf_threshold and would falsely count toward multiple-persons.
+                if conf >= self.person_conf_threshold:
+                    person_candidates.append(detection)
+            else:
+                if cls == self.phone_class_id:
+                    phone_detected = True
+                other_detections.append(detection)
+
+        persons = _dedupe(person_candidates, self.person_dedup_iou)
+        person_count = len(persons)
+        detections = other_detections + persons
 
         alerts = []
         snapshot_reasons = []

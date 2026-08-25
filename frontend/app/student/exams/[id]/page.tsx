@@ -23,14 +23,12 @@ export default function TakeExamPage() {
   const [session, setSession] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [cameraActive, setCameraActive] = useState(false);
   const [answers, setAnswers] = useState<Record<string, number>>({});
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [showSubmitModal, setShowSubmitModal] = useState(false);
   const [tabSwitches, setTabSwitches] = useState(0);
-  const [aiAlerts, setAiAlerts] = useState<{ type: string; message: string }[]>([]);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(() =>
     typeof document !== "undefined" && !!document.fullscreenElement
   );
@@ -67,7 +65,6 @@ export default function TakeExamPage() {
         if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
         streamRef.current = stream;
         if (videoRef.current) videoRef.current.srcObject = stream;
-        setCameraActive(true);
       } catch {
         setError("Camera access denied. Camera is required for this exam.");
       }
@@ -713,40 +710,10 @@ export default function TakeExamPage() {
               <ProctoringMonitor
                 sessionId={session.id}
                 videoRef={videoRef}
-                onAlert={(a) => setAiAlerts((prev) => [a, ...prev].slice(0, 20))}
               />
             )}
 
             <div className="space-y-2.5 pt-2">
-              <div className="flex items-center justify-between text-xs p-2.5 rounded-xl bg-muted/40 border border-border/50">
-                <span className="text-muted-foreground font-medium">Camera Feed</span>
-                <span className={`font-semibold flex items-center gap-1.5 ${cameraActive ? "text-emerald-600" : "text-destructive"}`}>
-                  <span className={`w-2 h-2 rounded-full ${cameraActive ? "bg-emerald-500" : "bg-destructive"}`} />
-                  {cameraActive ? "Active Stream" : "Disabled"}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between text-xs p-2.5 rounded-xl bg-muted/40 border border-border/50">
-                <span className="text-muted-foreground font-medium">Tab Switches</span>
-                <span className={tabSwitches > 1 ? "text-destructive font-bold" : "text-foreground font-semibold"}>
-                  {tabSwitches > 0 ? `${tabSwitches} (Warning logged)` : "0"}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between text-xs p-2.5 rounded-xl bg-muted/40 border border-border/50">
-                <span className="text-muted-foreground font-medium">Fullscreen Exits</span>
-                <span className={fullscreenExits > 0 ? "text-destructive font-bold" : "text-foreground font-semibold"}>
-                  {fullscreenExits > 0 ? `${fullscreenExits} (Violation recorded)` : "None"}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between text-xs p-2.5 rounded-xl bg-muted/40 border border-border/50">
-                <span className="text-muted-foreground font-medium">AI Flagged Violations</span>
-                <span className={aiAlerts.length > 0 ? "text-destructive font-bold" : "text-foreground font-semibold"}>
-                  {aiAlerts.length}
-                </span>
-              </div>
-
               <div className="flex items-center justify-between text-xs p-2.5 rounded-xl bg-muted/40 border border-border/50">
                 <span className="text-muted-foreground font-medium">Time Remaining</span>
                 <span className="font-mono font-bold text-foreground">
