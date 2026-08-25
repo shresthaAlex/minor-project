@@ -73,88 +73,14 @@ function directionMeta(dir: string | undefined) {
   return { label, color };
 }
 
-const WARNING_LABELS: Record<string, string> = {
-  gaze_away: "Looking away",
-  head_turn: "Head turned",
-  phone_detected: "Phone detected",
-  multiple_persons: "Multiple people",
-  person_absent: "No person detected",
-};
-
-function drawHud(
-  ctx: CanvasRenderingContext2D,
-  x: number,
-  y: number,
-  dirs: { head: { label: string; color: string }; eye: { label: string; color: string } },
-  warnings: ActiveWarning[] = []
-) {
-  const panelW = 168;
-  const panelPad = 12;
-  const rowH = 24;
-  let panelH = panelPad * 2 + rowH * 2;
-  const gazeWarnings = warnings.filter(
-    (w) => w.type === "gaze_away" || w.type === "head_turn"
-  );
-  if (gazeWarnings.length > 0) panelH += rowH + 4;
-
-  ctx.fillStyle = "rgba(0,0,0,0.55)";
-  ctx.beginPath();
-  ctx.roundRect(x, y, panelW, panelH, 10);
-  ctx.fill();
-
-  let cursor = y + panelPad;
-  const rows: Array<{ label: string; color: string }> = [
-    { label: dirs.head.label, color: dirs.head.color },
-    { label: dirs.eye.label, color: dirs.eye.color },
-  ];
-  const rowLabels = ["HEAD", "EYES"];
-
-  rows.forEach((row, i) => {
-    ctx.fillStyle = "rgba(255,255,255,0.55)";
-    ctx.font = "bold 11px sans-serif";
-    ctx.fillText(rowLabels[i], x + panelPad, cursor + 13);
-
-    ctx.fillStyle = row.color;
-    ctx.beginPath();
-    ctx.arc(x + panelPad + 46, cursor + 9, 4, 0, Math.PI * 2);
-    ctx.fill();
-
-    ctx.fillStyle = "#fff";
-    ctx.font = "bold 14px sans-serif";
-    ctx.fillText(row.label, x + panelPad + 58, cursor + 14);
-    cursor += rowH;
-  });
-
-  if (gazeWarnings.length > 0) {
-    const w = gazeWarnings[0];
-    const isViolation = w.level === "violation";
-    const wColor = isViolation ? "#ef4444" : "#f59e0b";
-    ctx.fillStyle = isViolation
-      ? "rgba(239,68,68,0.35)"
-      : "rgba(245,158,11,0.30)";
-    ctx.beginPath();
-    ctx.roundRect(x + panelPad, cursor - 6, panelW - panelPad * 2, 22, 6);
-    ctx.fill();
-    ctx.fillStyle = wColor;
-    ctx.font = "bold 11px sans-serif";
-    ctx.fillText(
-      `${isViolation ? "Violation" : "Warning"}: ${WARNING_LABELS[w.type] || w.message}`,
-      x + panelPad + 8,
-      cursor + 9
-    );
-  }
-}
-
 export default function ProctoringMonitor({
   sessionId,
   videoRef,
   onAlert,
 }: ProctoringMonitorProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const alertsRef = useRef<Alert[]>([]);
   const gazeRef = useRef<GazeData | null>(null);
-  const warningsRef = useRef<ActiveWarning[]>([]);
   const reconnectAttemptRef = useRef(0);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const mountedRef = useRef(true);
@@ -168,133 +94,6 @@ export default function ProctoringMonitor({
   const [gazeStatus, setGazeStatus] = useState<string | null>("normal");
   const [wsError, setWsError] = useState(false);
   const [fatalError, setFatalError] = useState<string | null>(null);
-
-  const drawOverlay = useCallback(
-    (detections: Detection[]) => {
-      const canvas = canvasRef.current;
-      const video = videoRef.current;
-      if (!canvas || !video) return;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      detections.forEach((d) => {
-        const [x1, y1, x2, y2] = d.bbox;
-        const isFlagged = d.label === "cell phone";
-        ctx.strokeStyle = isFlagged ? "#ef4444" : "#22c55e";
-        ctx.lineWidth = 2;
-        ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-        ctx.fillStyle = ctx.strokeStyle;
-        ctx.font = "14px sans-serif";
-        ctx.fillText(
-          `${d.label} ${(d.confidence * 100).toFixed(0)}%`,
-          x1,
-          y1 > 15 ? y1 - 5 : y1 + 15
-        );
-      });
-
-      const gaze = gazeRef.current;
-      if (!gaze) return;
-
-      const cw = canvas.width;
-      const ch = canvas.height;
-      const cx = cw / 2;
-      const cy = ch / 2;
-
-      if (!gaze.face_detected) {
-        ctx.fillStyle = "rgba(239,68,68,0.20)";
-        ctx.fillRect(0, 0, cw, ch);
-        ctx.fillStyle = "#ef4444";
-        ctx.font = "bold 18px sans-serif";
-        ctx.textAlign = "center";
-        ctx.fillText("⚠ FACE NOT DETECTED", cx, cy);
-        ctx.textAlign = "start";
-
-        // HUD panel still shown so the detection issue is explicit
-        const hHead = directionMeta("not_detected");
-        const hEye = directionMeta("not_detected");
-        drawHud(ctx, 10, 10, { head: hHead, eye: hEye }, warningsRef.current);
-        return;
-      }
-
-      const head = directionMeta(gaze.head_direction);
-      const eye = directionMeta(gaze.eye_direction);
-      const attention = head.label !== "Center" || eye.label !== "Center";
-      const baseColor = attention ? "#f59e0b" : "#22c55e";
-
-      // ── Head/Eyes HUD panel (top-left) ─────────────────────────
-      drawHud(ctx, 10, 10, { head, eye }, warningsRef.current);
-
-      // ── Head outline (ellipse) ───────────────────────────────
-      ctx.strokeStyle = "rgba(255,255,255,0.15)";
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.ellipse(cx, cy, cw * 0.14, ch * 0.30, 0, 0, Math.PI * 2);
-      ctx.stroke();
-
-// ── Direction arrow (yaw + pitch, from the student's perspective) ──
-        // Negative yaw = head turned to the student's left → arrow deflects
-        // image-right (the student's left side in a non-mirrored feed).
-        if (gaze.yaw !== null) {
-          const displayPitch = gaze.pitch ?? 0;
-          const scale = Math.max(cw, ch) / 100;
-          const gx = cx - gaze.yaw * scale;
-        const gy = cy + displayPitch * scale;
-        const clampedGx = Math.max(10, Math.min(cw - 10, gx));
-        const clampedGy = Math.max(10, Math.min(ch - 10, gy));
-
-        // Crosshair at centre
-        ctx.strokeStyle = "rgba(255,255,255,0.20)";
-        ctx.lineWidth = 1;
-        ctx.setLineDash([3, 4]);
-        ctx.beginPath();
-        ctx.moveTo(cx - 20, cy); ctx.lineTo(cx + 20, cy);
-        ctx.moveTo(cx, cy - 20); ctx.lineTo(cx, cy + 20);
-        ctx.stroke();
-        ctx.setLineDash([]);
-
-        // Arrow shaft
-        ctx.strokeStyle = baseColor;
-        ctx.globalAlpha = 0.7;
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(clampedGx, clampedGy);
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-
-        // Arrowhead
-        const angle = Math.atan2(clampedGy - cy, clampedGx - cx);
-        const headLen = 12;
-        ctx.fillStyle = baseColor;
-        ctx.beginPath();
-        ctx.moveTo(clampedGx, clampedGy);
-        ctx.lineTo(
-          clampedGx - headLen * Math.cos(angle - 0.4),
-          clampedGy - headLen * Math.sin(angle - 0.4),
-        );
-        ctx.lineTo(
-          clampedGx - headLen * Math.cos(angle + 0.4),
-          clampedGy - headLen * Math.sin(angle + 0.4),
-        );
-        ctx.closePath();
-        ctx.fill();
-
-        // Dot at destination
-        ctx.fillStyle = "#fff";
-        ctx.beginPath();
-        ctx.arc(clampedGx, clampedGy, 4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = baseColor;
-        ctx.lineWidth = 2;
-        ctx.stroke();
-      }
-    },
-    [videoRef]
-  );
 
   const buildUrl = useCallback(() => {
     let tokenParam = "";
@@ -357,7 +156,6 @@ export default function ProctoringMonitor({
         if (!mountedRef.current) return;
         setConnected(false);
         setActiveWarnings([]);
-        warningsRef.current = [];
 
         console.warn("Proctor WS closed: code=%d reason=%s", e.code, e.reason);
 
@@ -383,7 +181,6 @@ export default function ProctoringMonitor({
         if (!mountedRef.current) return;
         setConnected(false);
         setActiveWarnings([]);
-        warningsRef.current = [];
         setWsError(true);
       };
 
@@ -398,10 +195,8 @@ export default function ProctoringMonitor({
           }
 
           const result = data as ProctorResult;
-          drawOverlay(result.detections);
 
           if (result.active_warnings) {
-            warningsRef.current = result.active_warnings;
             setActiveWarnings(result.active_warnings);
           }
 
@@ -434,7 +229,7 @@ export default function ProctoringMonitor({
         reconnectTimerRef.current = setTimeout(connectFn, delay);
       }
     }
-  }, [buildUrl, drawOverlay]);
+  }, [buildUrl]);
 
   connectRef.current = connect;
 
@@ -525,10 +320,6 @@ export default function ProctoringMonitor({
           playsInline
           muted
           className="w-full h-full rounded-lg bg-black object-cover"
-        />
-        <canvas
-          ref={canvasRef}
-          className="absolute inset-0 w-full h-full pointer-events-none"
         />
       </div>
 
